@@ -1,5 +1,5 @@
 fetch:
-	rm -r output/ && mkdir output && node parser.js downloaded output  
+	rm -r output/ && mkdir output && node --trace-warnings parser.js downloaded output  
 
 export:
-	node exporter.js  output  
+	node  --trace-warnings exporter.js  output  

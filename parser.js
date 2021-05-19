@@ -13,6 +13,47 @@ const axios = require("axios");
 let HOST = "rec.monemprunt.com";
 
 /**
+ *
+ * @param {cheerio.Cheerio<cheerio.Element>} html
+ * @param {string} outFolder
+ * @returns {Array<Promise<string>>}
+ */
+function parseHTMLImages(html, outFolder, $) {
+  return html
+    .find("img")
+    .toArray()
+    .map((img) => new URL($(img).attr("src"), `https://${HOST}`))
+    .filter((url) => url.host === `${HOST}`)
+    .map(async (url) => {
+      return downloadImage(url, outFolder);
+    });
+}
+
+/**
+ *
+ * @param {URL} url
+ * @param {string} outFolder
+ * @returns {Promise<string>}
+ */
+async function downloadImage(url, outFolder) {
+  if (url) {
+    const imagePath = join(outFolder, url.pathname);
+    const [res] = await Promise.all([
+      fetch(url),
+      ensureDir(dirname(imagePath)),
+    ]);
+
+    const dest = createWriteStream(imagePath, "binary");
+    res.body.pipe(dest);
+    await new Promise((resolve, reject) => {
+      dest.once("finish", resolve);
+      dest.once("error", reject);
+    });
+  }
+  return url;
+}
+
+/**
  * @param {object} node
  * @param {string} node.title
  * @param {string} node.link
@@ -29,9 +70,28 @@ async function scrapePage(node, outFolder) {
   if (!node.published) return;
 
   const url = new URL(`${node.link}?_format=hal_json`);
-  let res;
+  let resJSON;
+  let pageBody;
+  let categoryPageBody;
+  let urlC;
+  let categorySlug;
+
   try {
-    res = await axios.get(url.toString());
+    resJSON = await axios.get(url.toString());
+    let resHTML = await fetch(new URL(`${node.link}`).toString());
+
+    let arr = node.link.split("/");
+    urlC = arr.slice(3, arr.length - 1).join("/");
+    categorySlug = arr[arr.length - 2];
+    let rescategoryHTML = await fetch(
+      new URL(`/pages/${urlC}`, `https://${HOST}`).toString()
+    );
+
+    // récupérer le HTML de la page de l'article
+    pageBody = await resHTML.text();
+
+    // récupérer le HTML de la page catégorie
+    categoryPageBody = await rescategoryHTML.text();
   } catch (error) {
     return;
   }
@@ -39,74 +99,86 @@ async function scrapePage(node, outFolder) {
   /**
    * @type {Array<{value: string, summary: string}>} body
    */
-  const body = res.data.body;
+  const body = resJSON.data.body;
 
   /**
    * @type {Array<{href: string}>} coverUrl
    */
   let imagePath =
-    res.data._links[
-      `http://rec.monemprunt.com/rest/relation/node/${res.data.type[0].target_id}/field_image`
+    resJSON.data._links[
+      `http://rec.monemprunt.com/rest/relation/node/${resJSON.data.type[0].target_id}/field_image`
     ];
 
   let coverUrl = imagePath ? new URL(imagePath[0].href) : null;
 
   const value = body ? body[0]?.value : "";
-  const summary = body ? body[1]?.summary : "";
+  const summary = body ? body[0]?.summary : "";
 
   const $ = cheerio.load(value || "");
+  const $$ = cheerio.load(pageBody || "");
+  const $c = cheerio.load(categoryPageBody || "");
+
   const article = $(":root");
+  const avatarNode = $$(".node-avatar");
+  const category = $c("h1").text();
+  const subcategoriesNodes = $c(".menupages ul");
 
-  const html = article.html() || "";
-  let imageDownloads = article
-    .find("img")
+  let subcategories = subcategoriesNodes
+    .find("li")
     .toArray()
-    .map((img) => new URL($(img).attr("src"), `https://${HOST}`))
-    .filter((url) => url.host === `${HOST}`)
-    .map(async (url) => {
-      const imagePath = join(outFolder, url.pathname);
-      const [res] = await Promise.all([
-        fetch(url),
-        ensureDir(dirname(imagePath)),
-      ]);
+    .map((li) => {
+      let name = $c(li).text().trim();
+      let arr = $c(li).find("a").attr("href").split("/");
+      let slug = arr[arr.length - 1];
 
-      const dest = createWriteStream(imagePath, "binary");
-      res.body.pipe(dest);
-      await new Promise((resolve, reject) => {
-        dest.once("finish", resolve);
-        dest.once("error", reject);
-      });
-      return url;
+      // console.log(`\x1b[34m${name}\x1b[37m`, ` => "\x1b[32m${slug}\x1b[37m"`);
+
+      return {
+        name,
+        slug,
+      };
     });
 
-  imageDownloads = [
-    ...imageDownloads,
-    (async (url) => {
-      if (url) {
-        const imagePath = join(outFolder, url.pathname);
-        const [res] = await Promise.all([
-          fetch(url),
-          ensureDir(dirname(imagePath)),
-        ]);
+  // console.log(
+  //   `\x1b[34m/pages/${urlC}\x1b[37m`,
+  //   ` => "\x1b[32m${category}\x1b[37m"`
+  // );
+  // console.log(subcategories);
+  // return;
 
-        const dest = createWriteStream(imagePath, "binary");
-        res.body.pipe(dest);
-        await new Promise((resolve, reject) => {
-          dest.once("finish", resolve);
-          dest.once("error", reject);
-        });
-      }
-      return url;
-    })(coverUrl),
-  ];
+  const html = article.html() || "";
+  let imageDownloads = parseHTMLImages(article, outFolder, $);
+  let avatarUrl = await Promise.all(parseHTMLImages(avatarNode, outFolder, $$));
+
+  imageDownloads = [...imageDownloads, downloadImage(coverUrl, outFolder)];
+
+  let link = resJSON.data.path ? resJSON.data.path[0]?.alias : null;
+  let coverPath = coverUrl?.pathname;
+  let coverFile = coverPath
+    ? coverPath.split("/")[coverPath.split("/").length - 1]
+    : null;
+
+  let avatarPath = avatarUrl[0]?.pathname;
+  let avatarFile = avatarPath
+    ? avatarPath.split("/")[avatarPath.split("/").length - 1]
+    : null;
 
   const saveHtml = outputFile(
     join(outFolder, `${url.pathname}.json`),
     JSON.stringify({
       title: node.title,
-      cover: coverUrl?.pathname,
-      link: res.data.path ? res.data.path[0]?.alias : null,
-      author: node.author.username,
+      cover: { path: coverPath, name: coverFile },
+      category: {
+        name: category,
+        slug: categorySlug,
+      },
+      subcategories,
+      link,
+      slug: link && link.split("/")[link.split("/").length - 1],
+      author: {
+        name: node.author.username,
+        avatar: { path: avatarPath, name: avatarFile },
+      },
       published: node.published,
       date: getDate(node.date),
       body: html,
