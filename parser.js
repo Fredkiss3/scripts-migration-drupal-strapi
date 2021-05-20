@@ -68,7 +68,7 @@ async function downloadImage(url, outFolder) {
  * @param {string} outFolder
  */
 async function scrapePage(node, outFolder) {
-  // console.log(`${node.title} => ${node.published}`);
+  // dont upload unpublished articles
   if (!node.published) return;
 
   const url = new URL(`${node.link}?_format=hal_json`);
@@ -89,10 +89,10 @@ async function scrapePage(node, outFolder) {
       new URL(`/pages/${urlC}`, `https://${HOST}`).toString()
     );
 
-    // récupérer le HTML de la page de l'article
+    // get the HTML content of the article page
     pageBody = await resHTML.text();
 
-    // récupérer le HTML de la page catégorie
+    // get the HTML content of the category page
     categoryPageBody = await rescategoryHTML.text();
   } catch (error) {
     return;
@@ -133,20 +133,11 @@ async function scrapePage(node, outFolder) {
       let arr = $c(li).find("a").attr("href").split("/");
       let slug = arr[arr.length - 1];
 
-      // console.log(`\x1b[34m${name}\x1b[37m`, ` => "\x1b[32m${slug}\x1b[37m"`);
-
       return {
         name,
         slug,
       };
     });
-
-  // console.log(
-  //   `\x1b[34m/pages/${urlC}\x1b[37m`,
-  //   ` => "\x1b[32m${category}\x1b[37m"`
-  // );
-  // console.log(subcategories);
-  // return;
 
   const html = article.html() || "";
   let imageDownloads = parseHTMLImages(article, outFolder, $);
