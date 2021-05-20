@@ -1,26 +1,19 @@
-const {
-  readdir,
-  readJson,
-  ensureDir,
-  outputFile,
-  createWriteStream,
-} = require("fs-extra");
-var fs = require("fs");
-var path = require("path");
-var FormData = require("form-data");
-const { join, dirname } = require("path");
+const { readJson } = require("fs-extra");
+const fs = require("fs");
+const path = require("path");
+const FormData = require("form-data");
 const cheerio = require("cheerio");
 const axios = require("axios");
 
-// TODO: Use env variables instead
-let STRAPI_HOST = "http://127.0.0.1:1337";
-let DRUPAL_HOST = "rec.monemprunt.com";
-const JWT_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiaWF0IjoxNjIwNzI3MzkzLCJleHAiOjE2MjMzMTkzOTN9.kgyFrBY1UrcOz-UQCZiiMnXWvZI4_Xpp2PQ7BBIVLZM";
+require("dotenv").config({ path: ".env.local" });
+
+const STRAPI_HOST = process.env.STRAPI_HOST;
+const DRUPAL_HOST = process.env.DRUPAL_HOST;
+
 const AXIOS_CONFIG = {
   headers: {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${JWT_TOKEN}`,
+    Authorization: `Bearer ${process.env.JWT_TOKEN}`,
   },
 };
 
@@ -266,32 +259,31 @@ async function exportSingleArticle(dataFolder, file) {
    * }} node
    */
   const node = await readJson(file);
-  let host = process.argv[3] || STRAPI_HOST;
 
   const category = await GetOrCreateCategory(
-    host,
+    STRAPI_HOST,
     node.category,
     node.subcategories
   );
-  const author = await GetOrCreateAuthor(host, dataFolder, node.author);
+  const author = await GetOrCreateAuthor(STRAPI_HOST, dataFolder, node.author);
   /** @type {{id: number}} cover */
   let cover;
   if (node.cover && node.cover.path && node.cover.name) {
     cover = await GetOrUploadImage(
-      host,
+      STRAPI_HOST,
       dataFolder,
       node.cover.path,
       node.cover.name
     );
   }
-  const body = await ProcessBody(host, dataFolder, node.body);
+  const body = await ProcessBody(STRAPI_HOST, dataFolder, node.body);
 
   // return;
   const { slug, title, date: published_date, summary } = node;
 
   // push to server
   const { data: articles } = await axios.get(
-    `${host}/articles?title=${encodeURIComponent(title)}`,
+    `${STRAPI_HOST}/articles?title=${encodeURIComponent(title)}`,
     AXIOS_CONFIG
   );
 
@@ -303,7 +295,7 @@ async function exportSingleArticle(dataFolder, file) {
 
     if (article.section == null || article.section.name != category.name) {
       await axios.put(
-        `${host}/articles/${articles[0].id}`,
+        `${STRAPI_HOST}/articles/${articles[0].id}`,
         {
           section: { id: category.id },
           body,
@@ -313,7 +305,7 @@ async function exportSingleArticle(dataFolder, file) {
     }
   } else {
     const { data } = await axios.post(
-      `${host}/articles`,
+      `${STRAPI_HOST}/articles`,
       {
         title,
         body,
@@ -340,13 +332,11 @@ async function exportSingleArticle(dataFolder, file) {
 
 /**
  * @param {string} dataFolder
- * @param {string} host
  */
 async function exportAllArticles(dataFolder) {
   let dataFiles = [];
   const articleFolders = ["guide-immo", "marche-immobilier", "actualites"];
   let processed = 0;
-  let all = [];
 
   for (let i = 0; i < articleFolders.length; i++) {
     const folder = articleFolders[i];
@@ -355,16 +345,12 @@ async function exportAllArticles(dataFolder) {
       dataFiles = [...dataFiles, ...results];
       processed++;
 
-      // if all folders have been processed
+      // if all folders have been processed then push to server
       if (processed == articleFolders.length) {
         dataFiles.reduce(
           (p, node) => p.then((_) => exportSingleArticle(dataFolder, node)),
           Promise.resolve({})
         );
-        // for (let i = 0; i < dataFiles; i++) {
-        //   const node = dataFiles[i];
-        //   all = [...all, exportSingleArticle(dataFolder, node)];
-        // }
       }
     });
   }

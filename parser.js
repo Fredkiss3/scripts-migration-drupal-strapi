@@ -10,7 +10,9 @@ const cheerio = require("cheerio");
 const fetch = require("node-fetch");
 const axios = require("axios");
 
-let HOST = "rec.monemprunt.com";
+require("dotenv").config({ path: ".env.local" });
+
+const HOST = process.env.DRUPAL_HOST;
 
 /**
  *
@@ -197,10 +199,8 @@ async function scrapePage(node, outFolder) {
  * @param {string} dataFolder
  * @param {string} outFolder
  * */
-async function scrapeAll(dataFolder, outFolder, host) {
+async function scrapeAll(dataFolder, outFolder) {
   const dataFiles = await readdir(dataFolder);
-
-  HOST = host;
 
   await Promise.all(
     // Iterate through list of JSON files
@@ -237,4 +237,4 @@ function getDate(date) {
   return new Date(`${year}-${month}-${day}T${hour}:${min}:00`);
 }
 
-scrapeAll(process.argv[2], process.argv[3], process.argv[4] || HOST);
+scrapeAll(process.argv[2], process.argv[3], HOST);
